@@ -14,29 +14,64 @@ function App() {
   const [answer, setAnswer] = useState("");
   const [message, setMessage] = useState("Type a 5-letter word and press Enter.");
 
-  useEffect(() => {
-    startGame();
-  }, []);
-
-  async function startGame() {
+  async function fetchNewGame() {
     const res = await fetch(apiUrl("/game"), { method: "POST" });
     const data = await res.json();
-    setGameId(data.gameId);
+    if (!data.gameId) throw new Error("No game id");
+    return data;
+  }
+
+  function resetBoard() {
     setRows(Array.from({ length: 6 }, () => Array(5).fill("")));
     setColors(Array.from({ length: 6 }, () => Array(5).fill("")));
     setCurrentRow(0);
     setCurrentCol(0);
     setState("playing");
     setAnswer("");
-    setMessage("New game started.");
+  }
+
+  useEffect(() => {
+    let ok = true;
+    fetchNewGame()
+      .then((data) => {
+        if (!ok) return;
+        setGameId(data.gameId);
+        resetBoard();
+        setMessage("New game started.");
+      })
+      .catch(() => {
+        if (!ok) return;
+        setMessage("Could not reach server.");
+      });
+    return () => {
+      ok = false;
+    };
+  }, []);
+
+  async function startGame() {
+    try {
+      const data = await fetchNewGame();
+      setGameId(data.gameId);
+      resetBoard();
+      setMessage("New game started.");
+    } catch {
+      setMessage("Could not reach server.");
+    }
   }
 
   function onTypeLetter(letter) {
     if (state !== "playing") return;
-    if (currentCol >= 5) return;
     if (!/^[A-Z]$/.test(letter)) return;
 
     const next = rows.map((r) => [...r]);
+
+    // Row already full (e.g. after "not in word list"): typing swaps the last tile so you can fix without only Backspace.
+    if (currentCol >= 5) {
+      next[currentRow][4] = letter;
+      setRows(next);
+      return;
+    }
+
     next[currentRow][currentCol] = letter;
     setRows(next);
     setCurrentCol((c) => c + 1);
@@ -68,7 +103,12 @@ function App() {
 
     const data = await res.json();
     if (!res.ok) {
-      setMessage(data.error || "Guess rejected.");
+      const base = data.error || "Guess rejected.";
+      const hint =
+        base === "Not in word list"
+          ? " Use Backspace or type to change the last letter."
+          : "";
+      setMessage(`${base}.${hint}`);
       return;
     }
 
